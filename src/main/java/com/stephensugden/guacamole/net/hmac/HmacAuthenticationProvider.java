@@ -13,10 +13,16 @@ import org.glyptodon.guacamole.protocol.GuacamoleConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sun.org.apache.xml.internal.security.utils.Base64;
 import javax.servlet.http.HttpServletRequest;
 import java.util.*;
 
 public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
+
+    /**
+     * Logger for this class.
+     */
+    private Logger logger = LoggerFactory.getLogger(HmacAuthenticationProvider.class);
 
     public static final long TEN_MINUTES = 10 * 60 * 1000;
 
@@ -59,21 +65,26 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
 
     public HmacAuthenticationProvider(TimeProviderInterface timeProvider) {
         this.timeProvider = timeProvider;
+	logger.debug("HMAC HmacAuthenticationProvider");
     }
 
     public HmacAuthenticationProvider() {
+	logger.debug("HMAC HmacAuthenticationProvider2");
         timeProvider = new DefaultTimeProvider();
     }
 
     @Override
     public Map<String, GuacamoleConfiguration> getAuthorizedConfigurations(Credentials credentials) throws GuacamoleException {
+	logger.debug("HMAC getAuthorizedConfigurations");
         if (signatureVerifier == null) {
+	    logger.debug("HMAC load prop");
             initFromProperties();
         }
 
         GuacamoleConfiguration config = getGuacamoleConfiguration(credentials.getRequest());
 
         if (config == null) {
+	    logger.debug("HMAC config null");
             return null;
         }
 
@@ -84,9 +95,11 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
 
     @Override
     public UserContext updateUserContext(UserContext context, Credentials credentials) throws GuacamoleException {
+	logger.debug("HMAC config updateUserContext");
         HttpServletRequest request = credentials.getRequest();
         GuacamoleConfiguration config = getGuacamoleConfiguration(request);
         if (config == null) {
+     	    logger.debug("HMAC config updateUserContext config null");
             return context;
         }
         String id = config.getParameter("id");
@@ -97,18 +110,26 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
     }
 
     private GuacamoleConfiguration getGuacamoleConfiguration(HttpServletRequest request) throws GuacamoleException {
+	logger.debug("HMAC config getGuacamoleConfiguration");
         if (signatureVerifier == null) {
+ 	    logger.debug("HMAC config getGuacamoleConfiguration init prop");
             initFromProperties();
         }
         String signature = request.getParameter(SIGNATURE_PARAM);
-
+        logger.debug("HMAC Request test id {}",request.getParameter("id"));
+        logger.debug("HMAC Request test guac.port {}",request.getParameter("guac.port"));
+        logger.debug("HMAC Request test getQueryString {}",request.getQueryString());
+        logger.debug("HMAC Request test signature {}",request.getParameter("signature"));
+        logger.debug("HMAC Request test timestamp {}",request.getParameter("timestamp"));
         if (signature == null) {
+	    logger.debug("HMAC Request signature null");
             return null;
         }
         signature = signature.replace(' ', '+');
 
         String timestamp = request.getParameter(TIMESTAMP_PARAM);
         if (!checkTimestamp(timestamp)) {
+	    logger.debug("HMAC Request wrong timestamp");
             return null;
         }
 
@@ -116,11 +137,13 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
 
         // Hostname is required!
         if (config.getParameter("hostname") == null) {
+            logger.debug("HMAC Request wrong hostname");
             return null;
         }
 
         // Hostname is required!
         if (config.getProtocol() == null) {
+            logger.debug("HMAC Request wrong protocol");
             return null;
         }
 
@@ -130,13 +153,16 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
         for (String name : SIGNED_PARAMETERS) {
             String value = config.getParameter(name);
             if (value == null) {
+                logger.debug("HMAC Request wrong: {}",name);
                 continue;
             }
             message.append(name);
             message.append(value);
         }
 
+	logger.debug("HMAC Request message {}",message);
         if (!signatureVerifier.verifySignature(signature, message.toString())) {
+            logger.debug("HMAC Request wrong Signature verify");
             return null;
         }
         String id = request.getParameter(ID_PARAM);
@@ -150,11 +176,14 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
         }
         // This isn't normally part of the config, but it makes it much easier to return a single object
         config.setParameter("id", id);
+	logger.debug("HMAC getGuacamoleConfiguration config {}",config.getParameter("id"));
         return config;
     }
 
     private boolean checkTimestamp(String ts) {
+	logger.debug("HMAC Request checkTimestamp:");
         if (ts == null) {
+	    logger.debug("HMAC Request checkTimestamp null");
             return false;
         }
         long timestamp = Long.parseLong(ts, 10);
@@ -163,11 +192,13 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
     }
 
     private GuacamoleConfiguration parseConfigParams(HttpServletRequest request) {
+	logger.debug("HMAC Request parseConfigParams");
         GuacamoleConfiguration config = new GuacamoleConfiguration();
 
         Map<String, String[]> params = request.getParameterMap();
 
         for (String name : params.keySet()) {
+            logger.debug("parseConfigParams name: {}", name);
             String value = request.getParameter(name);
             if (!name.startsWith(PARAM_PREFIX) || value == null || value.length() == 0) {
                 continue;
@@ -176,12 +207,24 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
                 config.setProtocol(request.getParameter(name));
             }
             else {
-                config.setParameter(name.substring(PARAM_PREFIX.length()), request.getParameter(name));
+		logger.debug("parseConfigParams else name: {}", name);
+		if(name.equals(PARAM_PREFIX + "password")) {
+		    logger.debug("parseConfigParams base64 decrypt password");
+		    try {
+			
+	                String value_decoded = new String(Base64.decode(request.getParameter(name).getBytes("UTF-8")),"UTF-8");
+			config.setParameter(name.substring(PARAM_PREFIX.length()), value_decoded);
+			logger.debug("parseConfigParams password {}",value_decoded);
+                    } catch(Exception e) {}
+		} else {
+                    config.setParameter(name.substring(PARAM_PREFIX.length()), request.getParameter(name));
+		}
             }
         }
 
         if (config.getProtocol() == null) config.setProtocol(defaultProtocol);
 
+        logger.debug("HMAC Request config-proto: {}", config.getProtocol());
         return config;
     }
 
@@ -195,5 +238,7 @@ public class HmacAuthenticationProvider extends SimpleAuthenticationProvider {
         }  else {
            timestampAgeLimit = GuacamoleProperties.getProperty(TIMESTAMP_AGE_LIMIT);
         }
+        logger.debug("HMAC Reading config: secretKey {}", secretKey);
+        logger.debug("HMAC Reading config: timestampAgeLimit {}", timestampAgeLimit);
     }
 }
